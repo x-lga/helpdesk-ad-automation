@@ -8,16 +8,16 @@ Built as part of a real-world IT support portfolio demonstrating competency acro
 
 ## Contents
 
-| Script | Purpose | Cert Alignment |
-|--------|---------|----------------|
-| `New-BulkADUsers.ps1` | Bulk create AD users from CSV with logging | A+, PowerShell |
-| `Reset-ADUserPassword.ps1` | L1 password reset with unlock check | A+, AD |
-| `Unlock-ADUserAccount.ps1` | Account unlock with status diagnostics | A+, AD |
-| `Export-ADUserReport.ps1` | Full AD user audit report to CSV | A+, ITIL 4 Change Mgmt |
-| `Watch-DiskSpace.ps1` | Disk monitoring with email alert | A+, Proactive Event Mgmt |
-| `Invoke-RemoteSession.ps1` | Remote PS session / command execution | A+, Net+ |
-| `ticket_intake.py` | Python L1 ticket intake with auto-categorisation | A+, ITIL 4 |
-| `itil4-ticket-workflow.md` | ITIL 4 priority matrix and escalation guide | ITIL 4 Foundation |
+| Script | Purpose |
+|--------|---------|
+| `New-BulkADUsers.ps1` | Bulk create AD users from CSV with logging |
+| `Reset-ADUserPassword.ps1` | L1 password reset with unlock check |
+| `Unlock-ADUserAccount.ps1` | Account unlock with status diagnostics |
+| `Export-ADUserReport.ps1` | Full AD user audit report to CSV |
+| `Watch-DiskSpace.ps1` | Disk monitoring with email alert |
+| `Invoke-RemoteSession.ps1` | Remote PS session / command execution |
+| `ticket_intake.py` | Python L1 ticket intake with auto-categorisation |
+| `itil4-ticket-workflow.md` | ITIL 4 priority matrix and escalation guide |
 
 ---
 
@@ -75,4 +75,4 @@ python3 scripts/ticket-intake/ticket_intake.py
 
 ## Outcome
 
-These scripts reduce repetitive administrative task time by an estimated 60% compared to manual GUI-based processes. All actions are logged with timestamps for audit trail compliance — aligned with ITIL 4 Change and Incident Management documentation requirements.
+These scripts reduce repetitive administrative task time by an estimated 60% compared to manual GUI-based processes. All actions are logged with timestamps for audit trail compliance - aligned with ITIL 4 Change and Incident Management documentation requirements.
