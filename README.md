@@ -51,19 +51,23 @@ All scripts tested in a Proxmox-hosted Windows Server 2022 domain controller env
 
 ### Run a script
 
+#### Bulk user creation
 ```powershell
-# Bulk user creation
 .\scripts\active-directory\New-BulkADUsers.ps1 -CsvPath ".\sample_users.csv" -OUPath "OU=Staff,DC=contoso,DC=local"
+```
 
-# Password reset
+#### Password reset
+```powershell
 .\scripts\active-directory\Reset-ADUserPassword.ps1 -Username jsmith
+```
 
-# Disk monitoring
+#### Disk monitoring
+```powershell
 .\scripts\disk-monitoring\Watch-DiskSpace.ps1
 ```
 
+#### Ticket intake (Python)
 ```bash
-# Ticket intake (Python)
 python3 scripts/ticket-intake/ticket_intake.py
 ```
 
