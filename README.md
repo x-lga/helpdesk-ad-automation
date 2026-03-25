@@ -1,5 +1,3 @@
-
-```markdown
 # helpdesk-ad-automation
 
 PowerShell and Python scripts for Active Directory user lifecycle management, L1 help desk ticket automation, and IT support workflows.
