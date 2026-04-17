@@ -1,4 +1,5 @@
-**Purpose:** Employee offboarding is a critical IT security process. When an employee leaves - voluntarily or otherwise - their access must be revoked immediately and completely.
+**Purpose:** Employee offboarding is a critical IT security process. When an employee 
+leaves - voluntarily or otherwise - their access must be revoked immediately and completely.
 Missed offboarding is a serious security risk: terminated employees with active accounts
 can exfiltrate data, access confidential systems, or cause damage. This script performs
 the complete offboarding checklist: disables the account, resets the password to an
