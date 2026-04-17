@@ -1,0 +1,16 @@
+This is the sample CSV file that `New-BulkADUsers.ps1` reads. Include it in the repo so anyone can clone 
+and test immediately.
+
+```csv
+FirstName,LastName,Department,Title,Manager
+Jane,Mwangi,Finance,Accounts Payable Clerk,Samuel Kamau
+Brian,Otieno,IT,IT Support Analyst,Faith Wanjiku
+Amina,Hassan,Human Resources,HR Coordinator,Grace Ndung'u
+Peter,Kariuki,Operations,Logistics Officer,John Maina
+Lydia,Njoroge,Finance,Senior Accountant,Samuel Kamau
+David,Mutua,IT,Systems Administrator,Faith Wanjiku
+Wanjiru,Gitau,Marketing,Digital Marketing Analyst,Alice Weru
+Samuel,Ochieng,Operations,Fleet Coordinator,John Maina
+Fatuma,Ali,Customer Service,Customer Support Agent,Mary Kibe
+Kevin,Ndungu,IT,Junior Cloud Admin,Faith Wanjiku
+```
