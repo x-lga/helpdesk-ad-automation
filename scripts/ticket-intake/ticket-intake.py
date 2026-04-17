@@ -1,219 +1,422 @@
+**Purpose:** L1 triage at scale is inconsistent. Different technicians follow different
+steps, ask different questions, classify the same issue at different priorities, and
+document at different levels of completeness. This variability leads to missed escalations,
+incomplete audit trails, and widely varying resolution times for identical issues.
+This Python tool standardises the intake process: every ticket receives a unique ID,
+is categorised by keyword matching against a structured resolution database, receives
+explicit step-by-step resolution guidance mapped to ITIL 4, has escalation criteria
+defined, and is logged to a JSON file for trend analysis. The tool covers seven of the
+most common L1 issue types. It is designed to be extended - adding a new issue type
+means adding one dictionary entry to RESOLUTIONS.
 
+```python
 #!/usr/bin/env python3
 """
 ticket_intake.py
 ================
-A simple L1 help desk ticket intake system.
-Categorises the issue by keyword matching and outputs resolution steps.
+L1 Help Desk Ticket Intake and Triage System — ITIL 4 Aligned
 
-Skills demonstrated: Python fundamentals, IT support workflow, ITIL 4 ticket categorisation.
-Cert alignment: CompTIA A+, ITIL 4 Foundation.
+This tool standardises the L1 ticket intake process by:
+  - Generating unique ticket IDs (format: INC-YYYYMMDD-XXXX)
+  - Collecting caller information with callback contact
+  - Categorising the issue by keyword matching against a structured resolution database
+  - Providing step-by-step resolution guidance with escalation criteria for each issue type
+  - Classifying by ITIL 4 priority (P1–P4) with SLA response and resolution targets
+  - Logging every ticket to a monthly JSON file for trend analysis and audit
+
+The resolution database covers seven of the most common L1 issue types.
+Extending coverage: add a new keyword key and resolution dict to RESOLUTIONS.
+
+Cert alignment  : CompTIA A+, ITIL 4 Foundation
+Skills shown    : Python fundamentals, ITIL 4 service management, CLI tool development,
+                  keyword categorisation, JSON audit logging, structured output
+Lab environment : Tested in Proxmox home lab on Ubuntu 22.04 and Windows 10
 """
 
 import datetime
 import json
 import random
 import string
+import os
 
-# --- Resolution database ---
-RESOLUTIONS = {
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  RESOLUTION DATABASE
+#  Each key is a keyword matched against the caller's issue description.
+#  The value is a dict with: category, priority, SLA targets, resolution steps,
+#  and escalation criteria.
+# ─────────────────────────────────────────────────────────────────────────────
+RESOLUTIONS: dict = {
+
     "password": {
-        "category": "Identity & Access",
-        "priority": "P3 - Medium",
+        "category"       : "Identity & Access Management",
+        "priority"       : "P3 — Medium",
+        "sla_response"   : "4 hours",
+        "sla_resolution" : "24 hours",
         "steps": [
-            "Verify caller identity (employee ID + manager name).",
-            "Check account status in Active Directory: Get-ADUser -Identity <username> -Properties *",
-            "If locked out, run: Unlock-ADAccount -Identity <username>",
-            "Reset password: Set-ADAccountPassword -Identity <username> -Reset -NewPassword (Read-Host -AsSecureString)",
-            "Force password change at next logon: Set-ADUser -Identity <username> -ChangePasswordAtLogon $true",
-            "Confirm user can log in. Log ticket as Resolved."
+            "VERIFY IDENTITY: Confirm caller identity BEFORE any account action. "
+            "Acceptable methods: employee ID number, manager name, callback to desk phone on file.",
+            "CHECK ACCOUNT STATUS: Run Unlock-ADUserAccount.ps1 to see full account state "
+            "before deciding on reset vs unlock vs escalate.",
+            "IF LOCKED: Run Unlock-ADUserAccount.ps1 to unlock. Test login. "
+            "If just locked (not expired): unlock may be all that is needed.",
+            "IF EXPIRED or full reset needed: Run Reset-ADUserPassword.ps1 -Username <samaccountname>. "
+            "Script generates a random temporary password and forces change at next logon.",
+            "COMMUNICATE: Relay the temporary password by PHONE — never by email or chat.",
+            "CONFIRM: Ask user to attempt login and confirm success before closing the ticket.",
+            "DOCUMENT: Record identity verification method, steps taken, and resolution outcome."
         ],
-        "escalate_if": "Account is disabled (not just locked) — requires L2 authorisation to re-enable."
+        "escalate_if": "Account is DISABLED (not locked) — requires L2 authorisation. "
+                       "Do NOT re-enable without approval from the user's manager and L2."
     },
+
     "internet": {
-        "category": "Network Connectivity",
-        "priority": "P2 - High",
+        "category"       : "Network Connectivity",
+        "priority"       : "P2 — High (single user) | P1 — Critical (multiple users)",
+        "sla_response"   : "1 hour (P2) | 15 minutes (P1)",
+        "sla_resolution" : "8 hours (P2) | 4 hours (P1)",
         "steps": [
-            "Ping loopback: ping 127.0.0.1 — verifies TCP/IP stack is functional.",
-            "Ping default gateway: ipconfig | findstr Gateway, then ping that IP.",
-            "Ping external: ping 8.8.8.8 — if this works but websites fail, issue is DNS.",
-            "Flush DNS: ipconfig /flushdns",
-            "Run nslookup google.com — check if DNS resolves.",
-            "If DHCP issue: ipconfig /release then ipconfig /renew",
-            "Last resort: netsh winsock reset, then reboot.",
-            "Document all findings and escalate to L2 if unresolved."
+            "SCOPE FIRST: Ask 'Is anyone else affected?' — if multiple users: P1, escalate immediately. "
+            "Do not spend time on client-side steps for a network-wide issue.",
+            "LAYER 1 (Physical): Check NIC lights — link (solid) + activity (blinking). "
+            "Reseat or swap ethernet cable. Confirm switch port LED shows link.",
+            "LAYER 3 (IP): Run ipconfig /all — confirm valid IP (not 169.254.x.x), gateway, DNS.",
+            "PING TEST SEQUENCE: "
+            "ping 127.0.0.1 (TCP/IP stack) → "
+            "ping <gateway> (local network) → "
+            "ping 8.8.8.8 (internet routing) → "
+            "ping google.com (DNS resolution).",
+            "INTERPRET: "
+            "Loopback fails = TCP/IP corrupt (netsh winsock reset, restart). "
+            "Gateway fails = local network/DHCP issue. "
+            "8.8.8.8 fails = routing/WAN issue (escalate). "
+            "google.com fails only = DNS issue (see DNS procedure, run ipconfig /flushdns).",
+            "DHCP: If IP is 169.254.x.x run: ipconfig /release && ipconfig /renew.",
+            "LAST RESORT (requires restart): netsh winsock reset, netsh int ip reset, "
+            "ipconfig /flushdns, ipconfig /release, ipconfig /renew — then restart.",
+            "DOCUMENT: Record all ping results and steps taken before escalating."
         ],
-        "escalate_if": "Multiple users affected on same switch — likely upstream issue, escalate immediately."
+        "escalate_if": "Multiple users affected on the same network segment, "
+                       "or issue persists after winsock reset and restart."
     },
+
     "slow": {
-        "category": "Performance",
-        "priority": "P3 - Medium",
+        "category"       : "Performance Degradation",
+        "priority"       : "P3 — Medium",
+        "sla_response"   : "4 hours",
+        "sla_resolution" : "24 hours",
         "steps": [
-            "Open Task Manager (Ctrl+Shift+Esc) — check CPU, Memory, Disk columns.",
-            "Sort by CPU descending — identify top consuming process.",
-            "Check Disk column: sustained 100% disk often = failing drive or Windows Update.",
-            "Run Windows Defender quick scan — malware causes performance degradation.",
-            "Disable startup programs: Task Manager > Startup tab.",
-            "Run Disk Cleanup: cleanmgr.exe",
-            "Check Windows Update status: Settings > Update & Security.",
-            "Document findings. If RAM consistently >90%: escalate for hardware evaluation."
+            "OPEN Task Manager (Ctrl+Shift+Esc). Click 'More Details' if in compact view.",
+            "SORT BY CPU: Identify the top-consuming process. Is it a known application or unknown?",
+            "CHECK DISK COLUMN: Sustained 100% disk = failing drive, Windows Update indexing, "
+            "or malware. This is a common cause of 'computer is slow' reports.",
+            "CHECK MEMORY: If physical RAM consistently >85% utilised, "
+            "machine needs more RAM — document for L2 hardware evaluation.",
+            "MALWARE: Run Windows Defender Quick Scan. Malware is a frequent cause of "
+            "sudden performance degradation.",
+            "STARTUP: Disable unnecessary startup programs — Task Manager > Startup tab. "
+            "This takes effect on next restart.",
+            "DISK CLEANUP: Run cleanmgr.exe. Select all categories including System Files. "
+            "Also clear C:\\Windows\\Temp and %TEMP%.",
+            "WINDOWS UPDATE: Check Settings > Windows Update for stuck updates. "
+            "A stuck update can saturate disk I/O and CPU.",
+            "DOCUMENT: Note top CPU/disk process name, RAM usage percentage, "
+            "free disk space, Defender scan result, and action taken."
         ],
-        "escalate_if": "Failing SMART disk health indicators — escalate immediately, risk of data loss."
+        "escalate_if": "SMART disk health failure indicators present, RAM consistently >90% "
+                       "with no runaway process, or hardware replacement required."
     },
+
     "printer": {
-        "category": "Hardware / Printing",
-        "priority": "P3 - Medium",
+        "category"       : "Hardware — Printing",
+        "priority"       : "P3 — Medium",
+        "sla_response"   : "4 hours",
+        "sla_resolution" : "24 hours",
         "steps": [
-            "Check physical connection: USB or network cable seated correctly.",
-            "Check printer display for error messages (paper jam, toner, etc.).",
-            "Clear print queue: Services > Print Spooler > Stop, delete files in C:\\Windows\\System32\\spool\\PRINTERS, Start spooler.",
-            "Remove and re-add printer: Settings > Printers & Scanners > Remove device > Add printer.",
-            "Update or rollback printer driver from Device Manager.",
-            "Test print from a different application to isolate if it's app-specific.",
-            "Check network printer IP hasn't changed — ping printer IP."
+            "PHYSICAL: Check USB or network cable at both ends. Check printer display panel "
+            "for error messages (paper jam, toner low, cover open).",
+            "POWER CYCLE: Turn printer off, wait 30 seconds, turn back on.",
+            "PRINT QUEUE: Clear stuck jobs — "
+            "Stop Print Spooler service → "
+            "delete all files in C:\\Windows\\System32\\spool\\PRINTERS → "
+            "Start Print Spooler. (Or run Clear-PrintQueue.ps1)",
+            "REINSTALL: Remove and re-add the printer — Settings > Printers & Scanners > "
+            "click printer > Remove > Add a printer or scanner.",
+            "DRIVER: Right-click the printer in Device Manager > Update Driver. "
+            "If update fails: download driver directly from manufacturer website.",
+            "TEST: Print a test page from Notepad. If Notepad prints but the application does not: "
+            "the issue is application-specific, not the printer.",
+            "NETWORK PRINTER: Ping the printer IP address. If unreachable: "
+            "check network cable, verify IP has not changed (DHCP lease issue)."
         ],
-        "escalate_if": "Hardware fault (e.g., roller jam requiring physical repair) — log and assign to on-site tech."
+        "escalate_if": "Physical hardware fault requiring physical repair "
+                       "(roller jam, fuser failure, paper path blockage) — escalate to on-site tech."
     },
+
     "vpn": {
-        "category": "Remote Access / VPN",
-        "priority": "P2 - High",
+        "category"       : "Remote Access — VPN",
+        "priority"       : "P2 — High (single user) | P1 — Critical (multiple users)",
+        "sla_response"   : "1 hour (P2) | 15 minutes (P1)",
+        "sla_resolution" : "8 hours (P2) | 4 hours (P1)",
         "steps": [
-            "Confirm: is this one user or multiple? Multiple = server-side, escalate to L2 immediately.",
-            "Check local internet connectivity first (ping 8.8.8.8).",
-            "Check VPN client logs for specific disconnect reason code.",
-            "Try WiFi vs wired connection — WiFi instability causes VPN drops.",
-            "Check MTU setting: many VPN clients require MTU 1400 or lower.",
-            "Disable any recently installed firewall or security software temporarily to test.",
-            "Reinstall VPN client if above steps fail.",
-            "Escalate to L2 with complete log file attached."
+            "SCOPE FIRST — MANDATORY: Ask 'Are other remote users also having VPN issues?' "
+            "Multiple users = P1 server-side issue. Escalate IMMEDIATELY. "
+            "Do not spend time on client-side steps.",
+            "LOCAL INTERNET: Confirm local internet works — ping 8.8.8.8. "
+            "If ping fails: local connectivity issue, not VPN. See internet procedure first.",
+            "VPN CLIENT LOGS: Locate and review VPN logs for the exact error code/message. "
+            "Cisco AnyConnect: %ProgramData%\\Cisco\\...\\AnyConnect.log | "
+            "GlobalProtect: %APPDATA%\\Palo Alto Networks\\GlobalProtect\\PanGPS.log | "
+            "OpenVPN: C:\\Program Files\\OpenVPN\\log\\ | "
+            "WireGuard: Show Log in the WireGuard app.",
+            "MTU: VPN adds overhead — large packets get fragmented and dropped. "
+            "Test: ping 8.8.8.8 -f -l 1400 (does it succeed?). "
+            "If fails at 1400, try 1300. "
+            "Fix: netsh interface ipv4 set subinterface 'Wi-Fi' mtu=1400 store=persistent",
+            "WIRED VS WIFI: Ask user to connect via ethernet cable and retry. "
+            "If VPN is stable on wired but not wireless: WiFi instability is the cause "
+            "(driver update, move closer to AP, or use wired permanently).",
+            "REINSTALL: If all above fail, uninstall and reinstall the VPN client.",
+            "ESCALATE: Provide L2 with: VPN client name and version, full log file, "
+            "scope check result, MTU test result, wired vs wireless result, "
+            "and time/duration of disconnections."
         ],
-        "escalate_if": "Multiple users or recurring drops post-fix — likely server certificate or routing issue."
+        "escalate_if": "Multiple users affected, VPN server certificate expiry, "
+                       "routing change required, or recurring drops within 24 hours of fix."
     },
+
     "email": {
-        "category": "Email / Microsoft 365",
-        "priority": "P2 - High",
+        "category"       : "Email — Microsoft 365",
+        "priority"       : "P2 — High",
+        "sla_response"   : "1 hour",
+        "sla_resolution" : "8 hours",
         "steps": [
-            "Check Microsoft 365 service health: admin.microsoft.com > Health > Service health.",
-            "Verify user's mailbox exists: M365 Admin > Users > Active users > search user.",
-            "Check Outlook connectivity: File > Account Settings > Test Account Settings.",
-            "Outlook offline mode: check bottom status bar for 'Working Offline' — click to toggle.",
-            "Clear Outlook cache: rename .ost file, restart Outlook.",
-            "If web access (OWA) works but Outlook doesn't: client-side issue, reinstall or recreate profile.",
-            "Check spam/junk folders for missing emails.",
-            "Check mailbox quota: may be full if emails are not sending."
+            "SERVICE HEALTH FIRST: Check Microsoft 365 Admin Centre > Health > Service Health. "
+            "If M365 is showing an active incident for Exchange: it is Microsoft's issue, "
+            "not a local issue. Document and wait. Do not waste time on client steps.",
+            "MAILBOX EXISTS: Verify in M365 Admin > Users > Active Users that the mailbox exists "
+            "and the user has an Exchange licence assigned.",
+            "OWA TEST: Can the user access email at outlook.office.com? "
+            "If OWA works and Outlook does not: client-side issue, not server.",
+            "WORKING OFFLINE: Check the Outlook status bar (bottom right) for 'Working Offline'. "
+            "Click it to toggle online. This is the most common 'Outlook not receiving' cause.",
+            "CONNECTIVITY TEST: In Outlook: File > Account Settings > Account Settings > "
+            "double-click the account > Test Account Settings. Review errors.",
+            "PROFILE REBUILD: If OWA works but Outlook consistently fails: "
+            "rename the .ost file (close Outlook first), reopen Outlook to rebuild. "
+            "Location: %LOCALAPPDATA%\\Microsoft\\Outlook\\",
+            "QUOTA: Check if the mailbox is full. A full mailbox cannot receive. "
+            "M365 Admin > Users > [user] > Mail tab > Mailbox usage.",
+            "JUNK / SPAM: Missing emails may be in Junk Email folder. "
+            "Check and add legitimate senders to the safe senders list."
         ],
-        "escalate_if": "Mailbox missing entirely or shared mailbox permissions issue — requires M365 admin action."
+        "escalate_if": "Mailbox missing entirely, licence assignment issue, "
+                       "shared mailbox permissions, or distribution group membership changes — "
+                       "all require M365 admin access that exceeds L1 scope."
     },
+
     "phishing": {
-        "category": "Security Incident",
-        "priority": "P1 - Critical",
+        "category"       : "Security Incident — Suspected Phishing Email",
+        "priority"       : "P1 — Critical if user clicked or entered credentials | P2 — High if reported before clicking",
+        "sla_response"   : "15 minutes (P1) | 1 hour (P2)",
+        "sla_resolution" : "4 hours (P1) | 8 hours (P2)",
         "steps": [
-            "IMMEDIATELY: Tell user — do NOT click any links, do NOT forward, do NOT delete.",
-            "Access email via admin console (Exchange Admin / M365) — NOT the user's machine.",
-            "Analyse email headers: check Reply-To, Return-Path, X-Originating-IP for spoofing.",
-            "Check sender domain spelling carefully (e.g., 'micros0ft.com' vs 'microsoft.com').",
-            "Hover over (do not click) any links — check actual URL destination.",
-            "Submit suspicious URLs to VirusTotal (virustotal.com) for sandbox analysis.",
-            "If confirmed phishing: quarantine the email from all mailboxes.",
-            "Document all indicators (sender, subject, URLs, headers) in the ticket.",
-            "Send user a training note explaining the phishing indicators.",
-            "Escalate to L2/Security team with your complete analysis attached.",
-            "ITIL 4: Log as Security Incident. P1 SLA applies."
+            "IMMEDIATE — TELL USER: 'Do NOT click any links, do NOT open any attachments, "
+            "do NOT forward the email, do NOT delete it yet.'",
+            "CLASSIFY: Ask 'Did you click any link or enter any credentials?' "
+            "If YES: this is P1. Skip to Step 9 immediately.",
+            "ACCESS EMAIL VIA ADMIN CONSOLE: Do NOT access the email from the user's machine. "
+            "Use Exchange Admin Centre or M365 Admin > Search for the message.",
+            "ANALYSE SENDER: Check From address (is the domain correct?), "
+            "Reply-To address (does it differ from From?), Return-Path header.",
+            "ANALYSE HEADERS: Extract full email headers. Check: "
+            "SPF result (pass/fail/softfail), DKIM result (pass/fail), DMARC result. "
+            "Check originating IP and whether it matches the claimed sender domain.",
+            "ANALYSE URLS: Do NOT click. Right-click any links → Copy link address. "
+            "Submit to: virustotal.com (URL tab) and urlscan.io. "
+            "Check domain registration age with whois — newly registered = high risk.",
+            "ANALYSE ATTACHMENTS: Do NOT open. Submit the file hash to virustotal.com. "
+            "If no hash available: submit the file to VirusTotal in a controlled environment only.",
+            "IF CONFIRMED PHISHING (P2 — user did not click): "
+            "Quarantine the email from all mailboxes (M365 Admin > Content Search > purge), "
+            "Block the sender domain at the email gateway, "
+            "Document all indicators (sender, subject, URLs, IPs, header findings), "
+            "Send user education note, "
+            "Escalate to L2 Security with full analysis attached.",
+            "IF P1 — USER CLICKED OR ENTERED CREDENTIALS: "
+            "IMMEDIATELY disable the user's account: Disable-ADAccount -Identity <username>. "
+            "IMMEDIATELY revoke all active M365/Entra ID sessions: "
+            "Azure Portal > Entra ID > Users > [user] > Revoke Sessions. "
+            "PHONE CALL to L2 Security team — do not wait for ticket queue. "
+            "Do NOT log the user out of their machine (forensic preservation). "
+            "Document: exact time reported, time of click if known, "
+            "credentials entered (M365 only? AD? VPN?). "
+            "Do NOT re-enable the account without L2 Security sign-off."
         ],
-        "escalate_if": "User clicked a link or entered credentials — IMMEDIATE escalation, potential credential compromise."
+        "escalate_if": "IMMEDIATE and MANDATORY escalation if user clicked any link "
+                       "or entered credentials. This is a P1 Security Incident — "
+                       "potential account compromise requiring incident response procedures."
     }
 }
 
-def generate_ticket_id():
-    """Generate a random ticket ID in format INC-YYYYMMDD-XXXX"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  HELPER FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_ticket_id() -> str:
+    """Generate a unique ticket ID: INC-YYYYMMDD-XXXX"""
     date_str = datetime.datetime.now().strftime("%Y%m%d")
-    suffix   = ''.join(random.choices(string.digits, k=4))
+    suffix   = "".join(random.choices(string.digits, k=4))
     return f"INC-{date_str}-{suffix}"
 
-def categorise_issue(description: str) -> dict:
-    """Match issue description to a category using keyword lookup."""
-    description_lower = description.lower()
+
+def categorise_issue(description: str) -> tuple:
+    """
+    Match the issue description against the RESOLUTIONS database by keyword.
+    Returns (resolution_dict, matched_keyword).
+    Falls back to a generic uncategorised resolution if no keyword matches.
+    """
+    desc_lower = description.lower()
+
     for keyword, resolution in RESOLUTIONS.items():
-        if keyword in description_lower:
-            return resolution
-    return {
-        "category": "Uncategorised",
-        "priority": "P3 - Medium",
+        if keyword in desc_lower:
+            return resolution, keyword
+
+    # No keyword match — return generic resolution
+    generic = {
+        "category"       : "Uncategorised — Manual Investigation Required",
+        "priority"       : "P3 — Medium (reassess after investigation)",
+        "sla_response"   : "4 hours",
+        "sla_resolution" : "24 hours",
         "steps": [
-            "Gather full details: What is the exact error message?",
-            "When did this start? Was anything recently installed or changed?",
-            "Is this affecting only this user or others?",
-            "Attempt a system restart and test again.",
-            "Document all findings in detail.",
-            "Escalate to L2 with complete information if not resolved in 15 minutes."
+            "GATHER: Ask for the exact error message or symptom — quote it word for word.",
+            "TIMELINE: When did this start? What changed recently "
+            "(software installed, Windows Update, hardware moved, password changed)?",
+            "SCOPE: Is this affecting only this user/device, or others as well?",
+            "REPRODUCE: Ask the user to reproduce the issue while you observe (remote or in person).",
+            "RESTART: If not already done, perform a full system restart and test again.",
+            "DOCUMENT: Record all findings with timestamps — symptoms, steps, results.",
+            "ESCALATE: If root cause not identified within 15 minutes at L1, escalate to L2 "
+            "with all documentation attached."
         ],
-        "escalate_if": "Cannot identify root cause at L1 within 15 minutes."
+        "escalate_if": "Root cause not identified within the L1 SLA window for the priority level."
     }
+    return generic, "unknown"
 
-def create_ticket():
-    """Interactive ticket intake process."""
-    print("\n" + "="*60)
-    print("   L1 HELP DESK TICKET INTAKE SYSTEM")
-    print("   ITIL 4 Aligned | CompTIA A+ Framework")
-    print("="*60)
 
-    ticket_id   = generate_ticket_id()
-    timestamp   = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def log_ticket(ticket_data: dict) -> str:
+    """
+    Append the ticket record to a monthly JSON log file.
+    Returns the log filename.
+    Each line in the file is a complete JSON object (JSON Lines format).
+    """
+    log_filename = f"helpdesk_tickets_{datetime.datetime.now().strftime('%Y%m')}.json"
+    try:
+        with open(log_filename, "a", encoding="utf-8") as f:
+            f.write(json.dumps(ticket_data, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"  WARNING: Could not write to log file '{log_filename}': {e}")
+    return log_filename
 
-    print(f"\nTicket ID  : {ticket_id}")
-    print(f"Opened     : {timestamp}")
-    print("-"*60)
 
-    caller_name  = input("Caller Name       : ").strip()
-    caller_dept  = input("Caller Department : ").strip()
-    description  = input("Issue Description : ").strip()
+def print_divider(char: str = "═", width: int = 65) -> None:
+    print(char * width)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MAIN TICKET INTAKE FUNCTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_ticket() -> None:
+    """Interactive L1 help desk ticket intake process."""
+
+    print("\n")
+    print_divider()
+    print("  L1 HELP DESK TICKET INTAKE SYSTEM")
+    print("  ITIL 4 Aligned | CompTIA A+ Portfolio Project")
+    print_divider()
+
+    ticket_id = generate_ticket_id()
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    print(f"\n  Ticket ID   : {ticket_id}")
+    print(f"  Opened at   : {timestamp}")
+    print_divider("─")
+
+    # Collect caller information
+    caller_name = input("  Caller full name        : ").strip()
+    caller_dept = input("  Caller department       : ").strip()
+    caller_ext  = input("  Callback phone/ext      : ").strip()
+    asset_name  = input("  Affected computer name  : ").strip()
+    description = input("  Issue description       : ").strip()
 
     if not description:
-        print("ERROR: Issue description cannot be empty.")
+        print("  ERROR: Issue description cannot be empty.")
         return
 
-    resolution   = categorise_issue(description)
+    # Categorise the issue
+    resolution, matched_keyword = categorise_issue(description)
 
-    print("\n" + "="*60)
-    print("   TICKET DETAILS")
-    print("="*60)
-    print(f"Ticket ID  : {ticket_id}")
-    print(f"Caller     : {caller_name} ({caller_dept})")
-    print(f"Issue      : {description}")
-    print(f"Category   : {resolution['category']}")
-    print(f"Priority   : {resolution['priority']}")
-    print(f"Opened     : {timestamp}")
+    # Display the structured ticket
+    print("\n")
+    print_divider()
+    print("  TICKET — CATEGORISED AND READY FOR TRIAGE")
+    print_divider()
+    print(f"  Ticket ID        : {ticket_id}")
+    print(f"  Opened           : {timestamp}")
+    print(f"  Caller           : {caller_name} ({caller_dept}) — {caller_ext}")
+    print(f"  Affected Asset   : {asset_name if asset_name else 'Not specified'}")
+    print(f"  Description      : {description}")
+    print(f"  Category         : {resolution['category']}")
+    print(f"  Priority         : {resolution['priority']}")
+    print(f"  SLA — Response   : {resolution['sla_response']}")
+    print(f"  SLA — Resolve    : {resolution['sla_resolution']}")
+    if matched_keyword != "unknown":
+        print(f"  Matched keyword  : '{matched_keyword}'")
+    else:
+        print(f"  Matched keyword  : none — manual categorisation required")
 
-    print("\n--- RESOLUTION STEPS ---")
-    for i, step in enumerate(resolution['steps'], 1):
-        print(f"  {i}. {step}")
+    print_divider("─")
+    print("  RESOLUTION STEPS")
+    print_divider("─")
+    for i, step in enumerate(resolution["steps"], 1):
+        # Word-wrap long steps at 60 chars for readability
+        print(f"  {i:02d}. {step}")
+        print()
 
-    print(f"\n--- ESCALATE IF ---")
-    print(f"  {resolution['escalate_if']}")
+    print_divider("─")
+    print(f"  ESCALATE IF: {resolution['escalate_if']}")
+    print_divider("─")
 
-    # Save to JSON log
-    ticket_data = {
-        "ticket_id"   : ticket_id,
-        "timestamp"   : timestamp,
-        "caller"      : caller_name,
-        "department"  : caller_dept,
-        "description" : description,
-        "category"    : resolution['category'],
-        "priority"    : resolution['priority'],
-        "steps"       : resolution['steps'],
-        "escalate_if" : resolution['escalate_if'],
-        "status"      : "Open"
+    # Log the ticket to JSON
+    ticket_record = {
+        "ticket_id"      : ticket_id,
+        "timestamp"      : timestamp,
+        "caller_name"    : caller_name,
+        "caller_dept"    : caller_dept,
+        "caller_callback": caller_ext,
+        "asset_name"     : asset_name,
+        "description"    : description,
+        "matched_keyword": matched_keyword,
+        "category"       : resolution["category"],
+        "priority"       : resolution["priority"],
+        "sla_response"   : resolution["sla_response"],
+        "sla_resolution" : resolution["sla_resolution"],
+        "steps"          : resolution["steps"],
+        "escalate_if"    : resolution["escalate_if"],
+        "status"         : "Open"
     }
 
-    log_filename = f"tickets_{datetime.datetime.now().strftime('%Y%m')}.json"
-    try:
-        with open(log_filename, 'a') as f:
-            f.write(json.dumps(ticket_data) + '\n')
-        print(f"\nTicket logged to: {log_filename}")
-    except Exception as e:
-        print(f"WARN: Could not save ticket log — {e}")
+    log_file = log_ticket(ticket_record)
+    print(f"  Ticket logged to : {log_file}")
+    print_divider()
+    print()
 
-    print("\n" + "="*60)
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     create_ticket()
