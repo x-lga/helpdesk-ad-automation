@@ -1,5 +1,4 @@
-This is the sample CSV file that `New-BulkADUsers.ps1` reads. Include it in the repo so anyone can clone 
-and test immediately.
+
 
 
 FirstName,LastName,Department,Title,Manager
